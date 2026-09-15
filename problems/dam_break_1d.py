@@ -55,6 +55,20 @@ class DamBreak1D(BaseProblem):
             "x_dam": self.x_dam,
         }
 
+    @property
+    def max_wave_speed(self) -> float:
+        """Speed of the head of the rarefaction fan, ``sqrt(g * h_l)``.
+
+        The rarefaction head is the fastest signal; the shock travels
+        somewhat slower. Beyond ``max_wave_speed * t`` the solution is
+        still exactly the initial state.
+        """
+        return math.sqrt(self.g * max(self.h_l, self.h_r))
+
+    @property
+    def disturbance_center(self) -> float:
+        return self.x_dam
+
     def initial_condition(self, x: np.ndarray, y: np.ndarray) -> dict[str, np.ndarray]:
         """Step function for h, zero velocity everywhere."""
         h0 = np.where(x <= self.x_dam, self.h_l, self.h_r).astype(float)

@@ -30,6 +30,27 @@ class BaseProblem(ABC):
     def parameters(self) -> dict[str, Any]:
         """Physical parameters (e.g., gravity, dam heights, Manning's n)."""
         return {}
+    
+    @property
+    def max_wave_speed(self) -> float:
+        """Upper bound on the speed of propagation of information.
+
+        Used by cone-focused samplers to restrict collocation points to
+        the region that can be affected by the initial disturbance at
+        time ``t``. The default (inf) disables cone focus, falling back
+        to uniform sampling everywhere.
+        """
+        return float("inf")
+
+    @property
+    def disturbance_center(self) -> float:
+        """x-coordinate around which the initial disturbance is centered.
+
+        Used together with ``max_wave_speed`` to bound the cone. The
+        default 0.0 is a sensible choice for problems with a single
+        initial discontinuity at the origin.
+        """
+        return 0.0
 
     @abstractmethod
     def initial_condition(self, x: np.ndarray, y: np.ndarray) -> dict[str, np.ndarray]:
