@@ -1,5 +1,9 @@
 """
 1D Dam Break problem (Riemann problem) for the 2D Shallow Water Equations.
+
+The problem is 1D in space (invariant along y) but is embedded in a 2D
+rectangular domain. This makes it a good testbed for 2D solvers (FVM, PINN)
+that must recover the y-invariance of the exact solution.
 """
 
 import math
@@ -17,6 +21,9 @@ class DamBreak1D(BaseProblem):
     Initial state:
         h = h_l, u = 0, v = 0  for x <= x_dam
         h = h_r, u = 0, v = 0  for x >  x_dam
+
+    The solution consists of a left-going rarefaction wave, a constant
+    star region, and a right-going shock wave.
     """
 
     def __init__(
@@ -28,6 +35,8 @@ class DamBreak1D(BaseProblem):
         g: float = 9.81,
     ):
         super().__init__(domain)
+        if h_l <= 0.0 or h_r <= 0.0:
+            raise ValueError(f"Water depths must be positive, got h_l={h_l}, h_r={h_r}")
         self.h_l = h_l
         self.h_r = h_r
         self.x_dam = x_dam
@@ -47,7 +56,7 @@ class DamBreak1D(BaseProblem):
         }
 
     def initial_condition(self, x: np.ndarray, y: np.ndarray) -> dict[str, np.ndarray]:
-        """Step function for h, zero velocity."""
+        """Step function for h, zero velocity everywhere."""
         h0 = np.where(x <= self.x_dam, self.h_l, self.h_r).astype(float)
         return {
             "h": h0,
@@ -57,39 +66,53 @@ class DamBreak1D(BaseProblem):
 
     def boundary_condition(
         self,
+        wall: str,
         x: np.ndarray,
         y: np.ndarray,
         t: np.ndarray,
-        normal_x: np.ndarray,
-        normal_y: np.ndarray,
     ) -> dict[str, dict[str, np.ndarray]]:
-        """Boundary conditions based on wall normals.
+        """Boundary conditions on a single wall.
 
-        - X-walls (|normal_x| > 0.5): Far-field Dirichlet.
-          Waves do not reach here within t_max, so h is exactly h_l or h_r.
-        - Y-walls (|normal_y| > 0.5): Slip wall.
-          Only v=0 is enforced; h and u are free.
+        - x-walls (``'x_min'``, ``'x_max'``): far-field Dirichlet. Within
+          ``t_max`` the fastest wave (the head of the rarefaction fan,
+          speed ``sqrt(g*h_l)``) does not reach the boundary, so ``h`` is
+          exactly the initial depth on that side and both velocities are
+          zero. This is *not* an approximation.
+        - y-walls (``'y_min'``, ``'y_max'``): free-slip. Only the normal
+          velocity ``v`` is constrained to zero. ``h`` and ``u`` are left
+          free because the true solution has ``u != 0`` along these walls
+          (it does not depend on ``y``); prescribing ``u = 0`` there would
+          contradict the PDE.
+
+        Variables absent from the returned dictionary are left free by the
+        caller.
         """
-        bc: dict[str, dict[str, np.ndarray]] = {"dirichlet": {}}
+        if wall in ("x_min", "x_max"):
+            h_far = np.where(x <= self.x_dam, self.h_l, self.h_r).astype(float)
+            return {
+                "dirichlet": {
+                    "h": h_far,
+                    "u": np.zeros_like(x, dtype=float),
+                    "v": np.zeros_like(x, dtype=float),
+                }
+            }
 
-        mask_x = np.abs(normal_x) > 0.5
-        if np.any(mask_x):
-            h_far = np.where(x <= self.x_dam, self.h_l, self.h_r)
-            bc["dirichlet"]["h"] = np.where(mask_x, h_far, 0.0)
-            bc["dirichlet"]["u"] = np.where(mask_x, 0.0, 0.0)
-            bc["dirichlet"]["v"] = np.where(mask_x, 0.0, 0.0)
+        if wall in ("y_min", "y_max"):
+            return {
+                "dirichlet": {
+                    "v": np.zeros_like(x, dtype=float),
+                }
+            }
 
-        mask_y = np.abs(normal_y) > 0.5
-        if np.any(mask_y):
-            v_target = bc["dirichlet"].get("v", np.zeros_like(y))
-            bc["dirichlet"]["v"] = np.where(mask_y, 0.0, v_target)
+        raise ValueError(f"Unknown wall: {wall!r}")
 
-        return bc
+    def exact_solution(
+        self, x: np.ndarray, y: np.ndarray, t: float
+    ) -> dict[str, np.ndarray] | None:
+        """Exact 1D Riemann solution at time ``t``. ``y`` is ignored.
 
-    def exact_solution(self, x: np.ndarray, t: float) -> dict[str, np.ndarray] | None:
-        """Exact 1D Riemann solution at time t.
-
-        Reference: E.F. Toro, "Shock-Capturing Methods for Free-Surface Shallow Flows", Chapter 5.
+        Reference: E.F. Toro, "Shock-Capturing Methods for Free-Surface
+        Shallow Flows", Chapter 5.
         """
         x = np.asarray(x, dtype=float)
         h = np.empty_like(x)
@@ -126,7 +149,12 @@ class DamBreak1D(BaseProblem):
         return {"h": h, "u": u, "v": np.zeros_like(x)}
 
     def _solve_star_region(self) -> tuple[float, float]:
-        """Find (h*, u*) in the star region using Brent's method."""
+        """Find ``(h*, u*)`` in the star region using Brent's method.
+
+        The star region is bracketed by the left rarefaction tail and the
+        right shock. The matching condition is that the left and right
+        wave branches produce equal velocities at the star state.
+        """
 
         def shock_branch(h_star: float, h_k: float) -> float:
             return (h_star - h_k) * math.sqrt(
@@ -146,7 +174,14 @@ class DamBreak1D(BaseProblem):
         def total(h_star: float) -> float:
             return f(h_star, self.h_l) + f(h_star, self.h_r)
 
-        h_star = brentq(total, 1e-12, 1e6 * max(self.h_l, self.h_r), xtol=1e-14, rtol=1e-14)  # type: ignore
+        h_star = brentq(
+            total,
+            np.float64(1e-12),
+            np.float64(1e6 * max(self.h_l, self.h_r)),
+            xtol=1e-14,
+            rtol=np.float64(1e-14),
+            full_output=False,
+        )
         u_star = 0.5 * (f(h_star, self.h_r) - f(h_star, self.h_l))  # type: ignore
 
         return float(h_star), float(u_star)  # type: ignore

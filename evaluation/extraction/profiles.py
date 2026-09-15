@@ -16,17 +16,11 @@ def extract_1d_from_fvm(
     grid: StructuredGrid2D,
     y_val: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Extract 1D profile (x, h, u, v) from FVM snapshot at y = y_val.
+    """Extract 1D profile ``(x, h, u, v)`` from an FVM snapshot at ``y = y_val``.
 
-    Args:
-        snapshot: Dictionary {'h': (Nx,Ny), 'u': (Nx,Ny), 'v': (Nx,Ny)}.
-        grid: Structured grid (provides X, Y, xc, yc).
-        y_val: Y-coordinate for the slice. Defaults to 0.0.
-
-    Returns:
-        (x, h, u, v) as 1D NumPy arrays of length Nx.
+    Picks the nearest row of cells to ``y_val``.
     """
-    j = np.argmin(np.abs(grid.yc - y_val))
+    j = int(np.argmin(np.abs(grid.yc - y_val)))
 
     x = grid.xc
     h = snapshot["h"][:, j]
@@ -36,41 +30,21 @@ def extract_1d_from_fvm(
     return x, h, u, v
 
 
-def extract_2d_from_fvm(
-    snapshot: dict[str, np.ndarray],
-) -> dict[str, np.ndarray]:
-    """Extract 2D fields from FVM snapshot (identity, for API consistency).
-
-    Args:
-        snapshot: Dictionary {'h': (Nx,Ny), 'u': (Nx,Ny), 'v': (Nx,Ny)}.
-
-    Returns:
-        The same dictionary (no transformation needed for FVM).
-    """
-    return snapshot
-
-
 def evaluate_pinn_1d(
     model: torch.nn.Module,
     t: float,
     x_range: tuple[float, float],
     y_val: float = 0.0,
     n_points: int = 500,
-    device: torch.device = torch.device("cpu"),
+    device: torch.device | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Evaluate PINN model along y = y_val at time t.
+    """Evaluate PINN along ``y = y_val`` at time ``t``.
 
-    Args:
-        model: PyTorch model mapping (x, y, t) -> (h, u, v).
-        t: Time at which to evaluate.
-        x_range: (x_min, x_max) for the profile.
-        y_val: Y-coordinate for the slice. Defaults to 0.0.
-        n_points: Number of points along x. Defaults to 500.
-        device: Device for evaluation. Defaults to CPU.
-
-    Returns:
-        (x, h, u, v) as 1D NumPy arrays of length n_points.
+    If ``device`` is None, uses the device of the model's first parameter.
     """
+    if device is None:
+        device = next(model.parameters()).device
+
     x = torch.linspace(x_range[0], x_range[1], n_points, device=device).view(-1, 1)
     y = torch.full_like(x, y_val)
     tt = torch.full_like(x, float(t))
@@ -92,21 +66,15 @@ def evaluate_pinn_2d(
     x_range: tuple[float, float],
     y_range: tuple[float, float],
     n_points: int = 200,
-    device: torch.device = torch.device("cpu"),
+    device: torch.device | None = None,
 ) -> dict[str, np.ndarray]:
-    """Evaluate PINN model on a 2D grid at time t.
+    """Evaluate PINN on an ``n_points × n_points`` grid at time ``t``.
 
-    Args:
-        model: PyTorch model mapping (x, y, t) -> (h, u, v).
-        t: Time at which to evaluate.
-        x_range: (x_min, x_max).
-        y_range: (y_min, y_max).
-        n_points: Number of points in each direction. Defaults to 200.
-        device: Device for evaluation. Defaults to CPU.
-
-    Returns:
-        Dictionary {'h': (n_points, n_points), 'u': ..., 'v': ...} as NumPy arrays.
+    If ``device`` is None, uses the device of the model's first parameter.
     """
+    if device is None:
+        device = next(model.parameters()).device
+
     xs = torch.linspace(x_range[0], x_range[1], n_points, device=device)
     ys = torch.linspace(y_range[0], y_range[1], n_points, device=device)
     XX, YY = torch.meshgrid(xs, ys, indexing="ij")

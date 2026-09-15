@@ -28,10 +28,7 @@ class BaseProblem(ABC):
 
     @property
     def parameters(self) -> dict[str, Any]:
-        """Physical parameters (e.g., gravity, dam heights, Manning's n).
-
-        Solvers (HLL, PINN) can read these to configure their internal operators.
-        """
+        """Physical parameters (e.g., gravity, dam heights, Manning's n)."""
         return {}
 
     @abstractmethod
@@ -39,39 +36,68 @@ class BaseProblem(ABC):
         """Evaluate the initial state at t = 0.
 
         Returns:
-            Dictionary mapping state variable names to their initial
-            values (e.g., {'h': array, 'u': array, 'v': array}).
+            Dictionary mapping state variable names to their initial values.
         """
         pass
 
     @abstractmethod
     def boundary_condition(
         self,
+        wall: str,
         x: np.ndarray,
         y: np.ndarray,
         t: np.ndarray,
-        normal_x: np.ndarray,
-        normal_y: np.ndarray,
     ) -> dict[str, dict[str, np.ndarray]]:
-        """Evaluate boundary conditions on the domain walls.
+        """Boundary conditions on a single wall of the domain.
 
-        The normal vectors allow the implementation to distinguish
-        wall orientation without hardcoding positions.
+        Args:
+            wall: One of ``'x_min'``, ``'x_max'``, ``'y_min'``, ``'y_max'``.
+            x, y, t: 1D arrays of the same shape giving coordinates of the
+                sample points on this wall. ``x`` and ``y`` may be constant
+                along the wall (e.g. ``x`` is fixed on ``x_min``).
 
         Returns:
-            Nested dictionary. Outer keys are condition types
-            ('dirichlet', 'neumann'). Inner dictionaries map
-            state-variable names to their prescribed values.
+            Nested dictionary ``{condition_type: {variable: value}}``.
+
+            Supported condition types:
+              * ``'dirichlet'``: prescribed value of the variable.
+
+            **A variable that is absent from the inner dictionary is left
+            free.** This is how the caller distinguishes "prescribed to
+            zero" from "not constrained at all".
+
+        Examples:
+            Slip wall (v = 0, h and u free)::
+
+                >>> {"dirichlet": {"v": np.zeros_like(x)}}
+
+            Far-field Dirichlet (all three variables prescribed)::
+
+                >>> {"dirichlet": {
+                ...     "h": np.full_like(x, 2.0),
+                ...     "u": np.zeros_like(x),
+                ...     "v": np.zeros_like(x),
+                ... }}
+
+            No condition on this wall::
+
+                >>> {}
         """
         pass
 
-    def exact_solution(self, x: np.ndarray, t: float) -> dict[str, np.ndarray] | None:
-        """Evaluate the exact solution at time t (if available).
+    def exact_solution(
+        self, x: np.ndarray, y: np.ndarray, t: float
+    ) -> dict[str, np.ndarray] | None:
+        """Evaluate the exact solution at time ``t`` (if available).
+
+        Args:
+            x, y: Arrays of the same shape with spatial coordinates.
+                ``y`` may be ignored for problems that are y-invariant.
+            t: Time.
 
         Returns:
-            Dictionary mapping state variable names to exact values,
-            or None if no analytical solution exists (e.g., for
-            problems with friction or topography).
+            Dictionary mapping state variable names to exact values, or
+            ``None`` if no analytical solution exists.
         """
         return None
 
@@ -84,17 +110,17 @@ class BaseProblem(ABC):
     ) -> dict[str, np.ndarray]:
         """Compute physical source terms (topography, friction, rainfall).
 
-        Returns sources in PRIMITIVE variables:
-          - 'h': mass source (e.g., rainfall intensity R)
-          - 'u': acceleration in x-direction (e.g., -g*z_x, Manning friction)
-          - 'v': acceleration in y-direction (e.g., -g*z_y, Manning friction)
+        Returns sources in PRIMITIVE variables, all of the same shape as ``h``:
 
-        Default implementation returns zero sources (inviscid SWE without external forces).
-        Concrete problems can override this to add physical effects.
+          * ``'mass'``:    rate of change of water depth (dh/dt), e.g. rainfall.
+          * ``'accel_x'``: acceleration in x (du/dt), e.g. ``-g*z_x``, friction.
+          * ``'accel_y'``: acceleration in y (dv/dt), e.g. ``-g*z_y``, friction.
 
-        NOTE: Solvers are responsible for integrating these sources into
-        their specific update steps (e.g., HLL multiplies accelerations
-        by h to get momentum sources; PINN subtracts them from the
-        primitive residual).
+        Solvers are responsible for integrating these into their update steps
+        (e.g. HLL multiplies accelerations by ``h`` to obtain momentum sources;
+        PINN subtracts them from the primitive residual).
+
+        The default implementation returns zero sources.
         """
-        return {var: np.zeros_like(h) for var in self.state_variables}
+        zeros = np.zeros_like(h)
+        return {"mass": zeros, "accel_x": zeros, "accel_y": zeros}

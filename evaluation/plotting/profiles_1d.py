@@ -25,25 +25,18 @@ def plot_1d_comparison(
     save_path: str | None = None,
     show: bool = False,
 ) -> None:
-    """Plot 1D profiles of h(x) and u(x) with exact solution.
+    """Plot 1D profiles of h(x) and (optionally) u(x) with the exact solution.
 
-    Args:
-        x: 1D array of x-coordinates.
-        h_exact: Exact solution for h.
-        h_pinn: PINN solution for h (optional).
-        h_fvm: FVM solution for h (optional).
-        u_exact: Exact solution for u (optional).
-        u_pinn: PINN solution for u (optional).
-        u_fvm: FVM solution for u (optional).
-        t: Time at which the profiles are evaluated (for title).
-        labels: Labels for the three methods.
-        save_path: If provided, save the figure to this path.
-        show: If True, display the plot interactively.
+    The second row is created only if at least one u-array is provided.
     """
     apply_paper_style()
     colors = get_colors()
 
-    fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    has_u = any(a is not None for a in (u_exact, u_pinn, u_fvm))
+    nrows = 2 if has_u else 1
+
+    fig, axes = plt.subplots(nrows, 1, figsize=(10, 4.0 * nrows), sharex=True)
+    axes = np.atleast_1d(axes)
 
     ax_h = axes[0]
     ax_h.plot(x, h_exact, color=colors["exact"], linewidth=2.0, label=labels[0])
@@ -65,27 +58,35 @@ def plot_1d_comparison(
     ax_h.legend()
     ax_h.grid(alpha=0.3)
 
-    ax_u = axes[1]
-    if u_exact is not None:
-        ax_u.plot(x, u_exact, color=colors["exact"], linewidth=2.0, label=labels[0])
-    if u_pinn is not None:
-        ax_u.plot(
-            x,
-            u_pinn,
-            color=colors["pinn"],
-            linewidth=1.5,
-            linestyle="--",
-            label=labels[1],
-        )
-    if u_fvm is not None:
-        ax_u.plot(
-            x, u_fvm, color=colors["fvm"], linewidth=1.5, linestyle=":", label=labels[2]
-        )
-    ax_u.set_xlabel("x")
-    ax_u.set_ylabel("u (velocity)")
-    ax_u.set_title(f"Velocity u(x, y=0) at t = {t:.2f}")
-    ax_u.legend()
-    ax_u.grid(alpha=0.3)
+    if has_u:
+        ax_u = axes[1]
+        if u_exact is not None:
+            ax_u.plot(x, u_exact, color=colors["exact"], linewidth=2.0, label=labels[0])
+        if u_pinn is not None:
+            ax_u.plot(
+                x,
+                u_pinn,
+                color=colors["pinn"],
+                linewidth=1.5,
+                linestyle="--",
+                label=labels[1],
+            )
+        if u_fvm is not None:
+            ax_u.plot(
+                x,
+                u_fvm,
+                color=colors["fvm"],
+                linewidth=1.5,
+                linestyle=":",
+                label=labels[2],
+            )
+        ax_u.set_xlabel("x")
+        ax_u.set_ylabel("u (velocity)")
+        ax_u.set_title(f"Velocity u(x, y=0) at t = {t:.2f}")
+        ax_u.legend()
+        ax_u.grid(alpha=0.3)
+    else:
+        axes[0].set_xlabel("x")
 
     plt.tight_layout()
 

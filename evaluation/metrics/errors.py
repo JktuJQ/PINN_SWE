@@ -1,6 +1,4 @@
-"""
-Error metrics: L2, Linf, relative errors.
-"""
+"""Error metrics: L2, Linf, relative errors."""
 
 import numpy as np
 
@@ -8,12 +6,7 @@ import numpy as np
 def relative_l2(predicted: np.ndarray, exact: np.ndarray) -> float:
     """Relative L2 error: ||predicted - exact|| / ||exact||.
 
-    Args:
-        predicted: Array of predicted values.
-        exact: Array of exact (reference) values.
-
-    Returns:
-        Relative L2 error as a float. Returns 0.0 if exact is zero.
+    Returns 0.0 if the exact norm is (numerically) zero.
     """
     norm_exact = np.linalg.norm(exact)
     if norm_exact < 1e-14:
@@ -35,22 +28,11 @@ def compute_all_errors(
     predicted: dict[str, np.ndarray],
     exact: dict[str, np.ndarray],
 ) -> dict[str, float]:
-    """Compute L2 and Linf errors for all state variables.
+    """Compute L2 and Linf errors for every variable present in both dicts.
 
-    Args:
-        predicted: Dictionary {'h': array, 'u': array, 'v': array}.
-        exact: Dictionary with the same keys.
-
-    Returns:
-        Dictionary with keys like 'L2_h', 'Linf_h', 'L2_u', 'Linf_u', etc.
-
-    Example:
-        >>> pred = {'h': h_pinn, 'u': u_pinn, 'v': v_pinn}
-        >>> exact = problem.exact_solution(x, t)
-        >>> errors = compute_all_errors(pred, exact)
-        >>> print(f"L2(h) = {errors['L2_h']:.2%}")
+    Returns a flat dictionary with keys ``'L2_<var>'`` and ``'Linf_<var>'``.
     """
-    errors = {}
+    errors: dict[str, float] = {}
     for var in predicted:
         if var in exact:
             p = predicted[var]
@@ -62,32 +44,43 @@ def compute_all_errors(
 
 def print_error_table(
     pinn_errors: dict[float, dict[str, float]],
-    fvm_errors: dict[float, dict[str, float]],
+    fvm_errors: dict[float, dict[str, float]] | None = None,
     title: str = "PINN vs FVM errors",
+    variables: tuple[str, ...] = ("h",),
 ) -> None:
-    """Print a formatted table comparing errors at different times.
+    """Print a formatted table of L2 and Linf errors at each time.
 
     Args:
-        pinn_errors: {t: {'L2_h': ..., 'Linf_h': ..., ...}}.
-        fvm_errors: Same format.
-        title: Table title.
+        pinn_errors: ``{t: {'L2_h': ..., 'Linf_h': ..., ...}}``.
+        fvm_errors: Same format, or None to print only PINN columns.
+        title: Table header.
+        variables: Which state variables to show. Must match keys present
+            in the error dicts (as ``'L2_<var>'`` / ``'Linf_<var>'``).
     """
     print(f"\n{title}")
-    print(
-        f"{'t':>6} | {'PINN L2(h)':>11} {'PINN Linf(h)':>13} | "
-        f"{'FVM L2(h)':>10} {'FVM Linf(h)':>12}"
-    )
-    print("-" * 62)
+
+    header = f"{'t':>6}"
+    for var in variables:
+        header += f" | {'PINN L2(' + var + ')':>14} {'PINN Linf(' + var + ')':>16}"
+    if fvm_errors:
+        for var in variables:
+            header += f" | {'FVM L2(' + var + ')':>13} {'FVM Linf(' + var + ')':>15}"
+    print(header)
+    print("-" * len(header))
 
     for t in sorted(pinn_errors):
-        p = pinn_errors[t]
-        fvm_key = min(fvm_errors, key=lambda s: abs(s - t)) if fvm_errors else None
-        f = fvm_errors[fvm_key] if fvm_key is not None else None
-
-        if f:
-            print(
-                f"{t:>6.2f} | {100 * p['L2_h']:>10.2f}% {p['Linf_h']:>13.4f} | "
-                f"{100 * f['L2_h']:>9.2f}% {f['Linf_h']:>12.4f}"
+        row = f"{t:>6.2f}"
+        for var in variables:
+            row += (
+                f" | {100 * pinn_errors[t].get(f'L2_{var}', float('nan')):>13.2f}%"
+                f" {pinn_errors[t].get(f'Linf_{var}', float('nan')):>16.4f}"
             )
-        else:
-            print(f"{t:>6.2f} | {100 * p['L2_h']:>10.2f}% {p['Linf_h']:>13.4f} |")
+        if fvm_errors:
+            key = min(fvm_errors, key=lambda s: abs(s - t))
+            f = fvm_errors[key]
+            for var in variables:
+                row += (
+                    f" | {100 * f.get(f'L2_{var}', float('nan')):>12.2f}%"
+                    f" {f.get(f'Linf_{var}', float('nan')):>15.4f}"
+                )
+        print(row)

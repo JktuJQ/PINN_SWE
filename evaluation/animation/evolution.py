@@ -2,9 +2,14 @@
 Time-evolution animations for 1D profiles, 2D fields, and 3D surfaces.
 
 Architecture:
-  - Low-level functions (animate_1d, animate_2d, animate_3d) accept ready data.
+  - Low-level functions (animate_1d, animate_2d, animate_3d) accept ready
+    data together with the physical domain, and render the animation.
   - High-level wrappers (animate_*_fvm, animate_*_pinn) extract data via
-    extraction/profiles.py and delegate to low-level functions.
+    extraction/profiles.py and delegate to the low-level functions.
+
+The domain is passed explicitly at every level. This keeps the rendering
+independent of whichever solver produced the data: FVM grids and PINN
+samplings render through the same code path.
 """
 
 from typing import Callable
@@ -12,9 +17,8 @@ from typing import Callable
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from mpl_toolkits.mplot3d import Axes3D
 
-from core import StructuredGrid2D
+from core import RectangularDomain
 from evaluation.plotting.styles import apply_paper_style, get_colors
 from evaluation.extraction.profiles import (
     extract_1d_from_fvm,
@@ -27,7 +31,7 @@ def animate_1d(
     x_list: list[np.ndarray],
     h_list: list[np.ndarray],
     t_list: list[float],
-    u_list: list[np.ndarray] | None = None,
+    domain: RectangularDomain,
     exact_fn: Callable[[np.ndarray, float], dict[str, np.ndarray]] | None = None,
     var: str = "h",
     y_label: str = "h (depth)",
@@ -38,30 +42,32 @@ def animate_1d(
     """Animate a 1D profile from pre-extracted data.
 
     Args:
-        x_list: List of x-coordinate arrays (one per frame).
-        h_list: List of h-profile arrays (one per frame).
-        t_list: List of times.
-        u_list: Optional list of u-profile arrays (unused in current plotting, kept for API).
-        exact_fn: Optional function exact_fn(x, t) -> dict with exact solution.
-        var: Variable name (for title).
-        y_label: Label for y-axis.
-        fps: Frames per second.
+        x_list:   List of x-coordinate arrays (one per frame).
+        h_list:   List of h-profile arrays (one per frame).
+        t_list:   List of times (one per frame).
+        domain:   Physical domain; sets the x-axis limits.
+        exact_fn: Optional function ``exact_fn(x, t) -> {var: array}`` for
+                  an overlay of the exact solution.
+        var:      Variable name (used in title and to pick the exact field).
+        y_label:  Label for the y-axis.
+        fps:      Frames per second.
         save_path: If provided, save animation to this path.
-        show: If True, display interactively.
+        show:      If True, display interactively.
 
     Returns:
-        FuncAnimation object.
+        The FuncAnimation object (the caller may need to keep a reference
+        until the animation is saved).
     """
     apply_paper_style()
     colors = get_colors()
 
     fig, ax = plt.subplots(figsize=(10, 5))
 
-    y_min = min(v.min() for v in h_list)
-    y_max = max(v.max() for v in h_list)
+    y_min = min(float(v.min()) for v in h_list)
+    y_max = max(float(v.max()) for v in h_list)
     margin = 0.1 * (y_max - y_min + 1e-6)
 
-    ax.set_xlim(x_list[0].min(), x_list[0].max())
+    ax.set_xlim(domain.x_min, domain.x_max)
     ax.set_ylim(y_min - margin, y_max + margin)
     ax.set_xlabel("x")
     ax.set_ylabel(y_label)
@@ -109,39 +115,24 @@ def animate_1d(
 def animate_2d(
     field_list: list[dict[str, np.ndarray]],
     times: list[float],
-    x_range: tuple[float, float] = (-6.0, 6.0),
-    y_range: tuple[float, float] = (-6.0, 6.0),
+    domain: RectangularDomain,
     var: str = "h",
     fps: int = 10,
     save_path: str | None = None,
     show: bool = False,
 ) -> FuncAnimation:
-    """Animate a 2D heatmap from pre-extracted data.
-
-    Args:
-        field_list: List of dicts {'h': (Nx,Ny), 'u': (Nx,Ny), 'v': (Nx,Ny)}.
-        times: List of times.
-        x_range: (x_min, x_max) for axis labels.
-        y_range: (y_min, y_max) for axis labels.
-        var: Variable to animate.
-        fps: Frames per second.
-        save_path: If provided, save animation.
-        show: If True, display interactively.
-
-    Returns:
-        FuncAnimation object.
-    """
+    """Animate a 2D heatmap from pre-extracted data."""
     apply_paper_style()
 
     data_0 = field_list[0][var]
     Nx, Ny = data_0.shape
-    x = np.linspace(x_range[0], x_range[1], Nx)
-    y = np.linspace(y_range[0], y_range[1], Ny)
+    x = np.linspace(domain.x_min, domain.x_max, Nx)
+    y = np.linspace(domain.y_min, domain.y_max, Ny)
     X, Y = np.meshgrid(x, y, indexing="ij")
 
     all_vals = [f[var] for f in field_list]
-    vmin = min(v.min() for v in all_vals)
-    vmax = max(v.max() for v in all_vals)
+    vmin = min(float(v.min()) for v in all_vals)
+    vmax = max(float(v.max()) for v in all_vals)
 
     fig, ax = plt.subplots(figsize=(8, 6))
     im = ax.pcolormesh(
@@ -149,6 +140,7 @@ def animate_2d(
     )
     ax.set_xlabel("x")
     ax.set_ylabel("y")
+    ax.set_aspect("equal", adjustable="box")
     title = ax.set_title(f"{var}(x, y) at t = {times[0]:.3f}")
     cbar = plt.colorbar(im, ax=ax)
     cbar.set_label(var)
@@ -175,8 +167,7 @@ def animate_2d(
 def animate_3d(
     field_list: list[dict[str, np.ndarray]],
     times: list[float],
-    x_range: tuple[float, float] = (-6.0, 6.0),
-    y_range: tuple[float, float] = (-6.0, 6.0),
+    domain: RectangularDomain,
     var: str = "h",
     elevation: float = 30,
     azimuth: float = -60,
@@ -184,34 +175,18 @@ def animate_3d(
     save_path: str | None = None,
     show: bool = False,
 ) -> FuncAnimation:
-    """Animate a 3D surface from pre-extracted data.
-
-    Args:
-        field_list: List of dicts {'h': (Nx,Ny), 'u': (Nx,Ny), 'v': (Nx,Ny)}.
-        times: List of times.
-        x_range: (x_min, x_max) for axis labels.
-        y_range: (y_min, y_max) for axis labels.
-        var: Variable to animate.
-        elevation: Viewing elevation angle.
-        azimuth: Viewing azimuth angle.
-        fps: Frames per second.
-        save_path: If provided, save animation.
-        show: If True, display interactively.
-
-    Returns:
-        FuncAnimation object.
-    """
+    """Animate a 3D surface from pre-extracted data."""
     apply_paper_style()
 
     data_0 = field_list[0][var]
     Nx, Ny = data_0.shape
-    x = np.linspace(x_range[0], x_range[1], Nx)
-    y = np.linspace(y_range[0], y_range[1], Ny)
+    x = np.linspace(domain.x_min, domain.x_max, Nx)
+    y = np.linspace(domain.y_min, domain.y_max, Ny)
     X, Y = np.meshgrid(x, y, indexing="ij")
 
     all_vals = [f[var] for f in field_list]
-    zmin = min(v.min() for v in all_vals)
-    zmax = max(v.max() for v in all_vals)
+    zmin = min(float(v.min()) for v in all_vals)
+    zmax = max(float(v.max()) for v in all_vals)
 
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection="3d")
@@ -261,7 +236,8 @@ def animate_3d(
 
 def animate_1d_fvm(
     snapshots: list[dict[str, np.ndarray]],
-    grid: StructuredGrid2D,
+    grid,
+    domain: RectangularDomain,
     times: list[float],
     exact_fn: Callable[[np.ndarray, float], dict[str, np.ndarray]] | None = None,
     var: str = "h",
@@ -270,62 +246,22 @@ def animate_1d_fvm(
     save_path: str | None = None,
     show: bool = False,
 ) -> FuncAnimation:
-    """Animate 1D profile from FVM snapshots.
+    """Animate a 1D profile from FVM snapshots.
 
-    Extracts data via extract_1d_from_fvm and delegates to animate_1d.
+    ``grid`` is used to locate the y-slice; ``domain`` is used only for
+    rendering.
     """
-    x_list, h_list, u_list = [], [], []
+    x_list, h_list = [], []
     for snap in snapshots:
-        x, h, u, v = extract_1d_from_fvm(snap, grid, y_val=y_val)
+        x, h, _, _ = extract_1d_from_fvm(snap, grid, y_val=y_val)
         x_list.append(x)
         h_list.append(h)
-        u_list.append(u)
 
     return animate_1d(
         x_list,
         h_list,
         times,
-        u_list=u_list,
-        exact_fn=exact_fn,
-        var=var,
-        fps=fps,
-        save_path=save_path,
-        show=show,
-    )
-
-
-def animate_1d_pinn(
-    model,
-    t_start: float = 0.0,
-    t_end: float = 1.0,
-    n_frames: int = 50,
-    x_range: tuple[float, float] = (-6.0, 6.0),
-    y_val: float = 0.0,
-    n_points: int = 500,
-    exact_fn: Callable[[np.ndarray, float], dict[str, np.ndarray]] | None = None,
-    var: str = "h",
-    fps: int = 10,
-    save_path: str | None = None,
-    show: bool = False,
-) -> FuncAnimation:
-    """Animate 1D profile from PINN model.
-
-    Evaluates model via evaluate_pinn_1d and delegates to animate_1d.
-    """
-    times = np.linspace(t_start, t_end, n_frames).tolist()
-    x_list, h_list, u_list = [], [], []
-
-    for t in times:
-        x, h, u, v = evaluate_pinn_1d(model, t, x_range, y_val, n_points)
-        x_list.append(x)
-        h_list.append(h)
-        u_list.append(u)
-
-    return animate_1d(
-        x_list,
-        h_list,
-        times,
-        u_list=u_list,
+        domain,
         exact_fn=exact_fn,
         var=var,
         fps=fps,
@@ -336,53 +272,20 @@ def animate_1d_pinn(
 
 def animate_2d_fvm(
     snapshots: list[dict[str, np.ndarray]],
-    grid: StructuredGrid2D,
+    domain: RectangularDomain,
     times: list[float],
     var: str = "h",
     fps: int = 10,
     save_path: str | None = None,
     show: bool = False,
 ) -> FuncAnimation:
-    """Animate 2D heatmap from FVM snapshots.
-
-    Uses grid bounds to ensure correct axis mapping and delegates to animate_2d.
-    """
-    x_range = (grid.x_min, grid.x_max)
-    y_range = (grid.y_min, grid.y_max)
-
-    return animate_2d(snapshots, times, x_range, y_range, var, fps, save_path, show)
-
-
-def animate_2d_pinn(
-    model,
-    t_start: float = 0.0,
-    t_end: float = 1.0,
-    n_frames: int = 50,
-    x_range: tuple[float, float] = (-6.0, 6.0),
-    y_range: tuple[float, float] = (-6.0, 6.0),
-    n_points: int = 200,
-    var: str = "h",
-    fps: int = 10,
-    save_path: str | None = None,
-    show: bool = False,
-) -> FuncAnimation:
-    """Animate 2D heatmap from PINN model.
-
-    Evaluates model via evaluate_pinn_2d and delegates to animate_2d.
-    """
-    times = np.linspace(t_start, t_end, n_frames).tolist()
-    field_list = []
-
-    for t in times:
-        field = evaluate_pinn_2d(model, t, x_range, y_range, n_points)
-        field_list.append(field)
-
-    return animate_2d(field_list, times, x_range, y_range, var, fps, save_path, show)
+    """Animate a 2D heatmap from FVM snapshots."""
+    return animate_2d(snapshots, times, domain, var, fps, save_path, show)
 
 
 def animate_3d_fvm(
     snapshots: list[dict[str, np.ndarray]],
-    grid: StructuredGrid2D,
+    domain: RectangularDomain,
     times: list[float],
     var: str = "h",
     elevation: float = 30,
@@ -391,18 +294,11 @@ def animate_3d_fvm(
     save_path: str | None = None,
     show: bool = False,
 ) -> FuncAnimation:
-    """Animate 3D surface from FVM snapshots.
-
-    Uses grid bounds to ensure correct axis mapping and delegates to animate_3d.
-    """
-    x_range = (grid.x_min, grid.x_max)
-    y_range = (grid.y_min, grid.y_max)
-
+    """Animate a 3D surface from FVM snapshots."""
     return animate_3d(
         snapshots,
         times,
-        x_range,
-        y_range,
+        domain,
         var,
         elevation,
         azimuth,
@@ -412,13 +308,74 @@ def animate_3d_fvm(
     )
 
 
-def animate_3d_pinn(
+def animate_1d_pinn(
     model,
+    domain: RectangularDomain,
     t_start: float = 0.0,
     t_end: float = 1.0,
     n_frames: int = 50,
-    x_range: tuple[float, float] = (-6.0, 6.0),
-    y_range: tuple[float, float] = (-6.0, 6.0),
+    y_val: float = 0.0,
+    n_points: int = 500,
+    exact_fn: Callable[[np.ndarray, float], dict[str, np.ndarray]] | None = None,
+    var: str = "h",
+    fps: int = 10,
+    save_path: str | None = None,
+    show: bool = False,
+) -> FuncAnimation:
+    """Animate a 1D profile from a PINN model."""
+    times = np.linspace(t_start, t_end, n_frames).tolist()
+    x_list, h_list = [], []
+
+    x_range = (domain.x_min, domain.x_max)
+    for t in times:
+        x, h, _, _ = evaluate_pinn_1d(model, t, x_range, y_val, n_points)
+        x_list.append(x)
+        h_list.append(h)
+
+    return animate_1d(
+        x_list,
+        h_list,
+        times,
+        domain,
+        exact_fn=exact_fn,
+        var=var,
+        fps=fps,
+        save_path=save_path,
+        show=show,
+    )
+
+
+def animate_2d_pinn(
+    model,
+    domain: RectangularDomain,
+    t_start: float = 0.0,
+    t_end: float = 1.0,
+    n_frames: int = 50,
+    n_points: int = 200,
+    var: str = "h",
+    fps: int = 10,
+    save_path: str | None = None,
+    show: bool = False,
+) -> FuncAnimation:
+    """Animate a 2D heatmap from a PINN model."""
+    times = np.linspace(t_start, t_end, n_frames).tolist()
+    field_list = []
+
+    x_range = (domain.x_min, domain.x_max)
+    y_range = (domain.y_min, domain.y_max)
+    for t in times:
+        field = evaluate_pinn_2d(model, t, x_range, y_range, n_points)
+        field_list.append(field)
+
+    return animate_2d(field_list, times, domain, var, fps, save_path, show)
+
+
+def animate_3d_pinn(
+    model,
+    domain: RectangularDomain,
+    t_start: float = 0.0,
+    t_end: float = 1.0,
+    n_frames: int = 50,
     n_points: int = 200,
     var: str = "h",
     elevation: float = 30,
@@ -427,13 +384,12 @@ def animate_3d_pinn(
     save_path: str | None = None,
     show: bool = False,
 ) -> FuncAnimation:
-    """Animate 3D surface from PINN model.
-
-    Evaluates model via evaluate_pinn_2d and delegates to animate_3d.
-    """
+    """Animate a 3D surface from a PINN model."""
     times = np.linspace(t_start, t_end, n_frames).tolist()
     field_list = []
 
+    x_range = (domain.x_min, domain.x_max)
+    y_range = (domain.y_min, domain.y_max)
     for t in times:
         field = evaluate_pinn_2d(model, t, x_range, y_range, n_points)
         field_list.append(field)
@@ -441,8 +397,7 @@ def animate_3d_pinn(
     return animate_3d(
         field_list,
         times,
-        x_range,
-        y_range,
+        domain,
         var,
         elevation,
         azimuth,
