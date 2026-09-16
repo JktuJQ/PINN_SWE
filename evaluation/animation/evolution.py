@@ -201,6 +201,12 @@ def animate_3d(
     title = ax.set_title(f"{var}(x, y) at t = {times[0]:.3f}", fontsize=14, pad=20)
     fig.colorbar(surf, ax=ax, shrink=0.5, aspect=10, label=var)
 
+    xlim = (domain.x_min, domain.x_max)
+    ylim = (domain.y_min, domain.y_max)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_zlim(zmin - 0.2 * zmin, zmax + 0.2 * zmax)
+
     def update(frame: int) -> list:
         ax.clear()
         ax.plot_surface(
@@ -217,6 +223,9 @@ def animate_3d(
         ax.set_xlabel("x", fontsize=12, labelpad=10)
         ax.set_ylabel("y", fontsize=12, labelpad=10)
         ax.set_zlabel(var, fontsize=12, labelpad=10)
+        ax.set_xlim(*xlim)
+        ax.set_ylim(*ylim)
+        ax.set_zlim(zmin - 0.2 * zmin, zmax + 0.2 * zmax)
         ax.set_title(f"{var}(x, y) at t = {times[frame]:.3f}", fontsize=14, pad=20)
         return []
 

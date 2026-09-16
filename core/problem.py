@@ -145,3 +145,20 @@ class BaseProblem(ABC):
         """
         zeros = np.zeros_like(h)
         return {"mass": zeros, "accel_x": zeros, "accel_y": zeros}
+    
+    @property
+    def disturbance_is_radial(self) -> bool:
+        """Shape of the region containing the non-trivial dynamics.
+
+        * ``False`` (default): a vertical strip
+          ``|x - disturbance_center| <= max_wave_speed * t`` spanning
+          the whole y-range. Matches 1D problems embedded in 2D.
+        * ``True``: a disk of radius ``max_wave_speed * t`` centered at
+          ``(disturbance_center, 0)``. Matches radially symmetric
+          problems such as a circular dam break.
+
+        Note: for the radial case the y-coordinate of the center is
+        fixed at 0. If a future problem needs an off-center disk, this
+        API will need a ``disturbance_center_y`` companion property.
+        """
+        return False
