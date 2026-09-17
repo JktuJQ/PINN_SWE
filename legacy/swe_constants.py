@@ -61,6 +61,11 @@ N_F = 8192               # внутри области (невязка ФДУ)
 N_IC = 2048              # начальные условия
 N_BC = 1024              # на каждую пару границ (x-стенки и y-стенки)
 
+H_L_MIN, H_L_MAX = 0.5, 3.0    # диапазон h_L
+H_R_MIN, H_R_MAX = 0.5, 3.0    # диапазон h_R
+H_MIN = min(H_L_MIN, H_R_MIN)  # для нормировки
+H_MAX = max(H_L_MAX, H_R_MAX)
+
 # ----------------------------------------------------------------------------
 # Искусственная вязкость (метод исчезающей вязкости)
 # ----------------------------------------------------------------------------
@@ -142,7 +147,7 @@ def _pick_device():
 DEVICE = _pick_device()
 
 MODEL_PATH = "data/pinn_swe.model"
-
+MODEL_PATH_FOR_ALL_INITIAL_CONDITIONS = "data/pinn_swe_for_all_initial_conditions.model"
 
 def check_domain_is_large_enough():
     """Проверяет, что за T_MAX волны не доходят до границы (иначе BC неточное)."""
